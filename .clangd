@@ -1,0 +1,6 @@
+CompileFlags:
+  Add: [
+    -DWSDL_DEBUG,
+    -xc++,
+    -std=c++17,
+  ]
