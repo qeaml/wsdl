@@ -19,7 +19,9 @@ qeaml 26.12.2022
 #pragma once
 
 #include <SDL2/SDL.h>
+#include <optional>
 #include <functional>
+#include <filesystem>
 
 #ifdef WSDL_DEBUG
 #include <iostream>
@@ -27,12 +29,39 @@ qeaml 26.12.2022
 
 namespace sdl {
 
+using Path = std::filesystem::path;
+
 // define classes up here so they can be referred to down there
 class SDL;
 class WindowFlags;
 class Window;
 class RendererFlags;
 class Renderer;
+
+class RWOps {
+private:
+  SDL& mSDL;
+  SDL_RWops *mIntern;
+  bool mOK, mClosed;
+
+public:
+  enum Whence {
+    Set, Cur, End
+  };
+
+  RWOps(SDL&, const char *fn, const char *mode);
+  ~RWOps();
+  bool ok();
+
+  Sint64 size();
+  Sint64 seek(Sint64 pos);
+  Sint64 seek(Sint64 pos, Whence whence);
+  size_t read(void *buf, size_t size);
+  size_t read(void *buf, size_t elem_size, size_t num);
+  size_t write(const void *buf, size_t size);
+  size_t write(const void *buf, size_t elem_size, size_t num);
+  void close();
+};
 
 // contains flags deciding which subsystems should be initialized by the
 // sdl::SDL(InitFlags) constructor
@@ -72,6 +101,7 @@ class SDL {
 private:
   bool mOK;
   Event mEvent;
+  std::optional<Path> mBasePath;
 
 public:
   SDL(InitFlags);
@@ -80,10 +110,16 @@ public:
 
   void pollEvents(std::function<void(Event)>);
 
+  Path basePath();
+  Path prefPath(const char *org, const char *app);
+  RWOps open(const char *fn, const char *mode);
+  RWOps open(Path p, const char *mode);
+
   Window createWindow(WindowFlags, const char *title, int x, int y, int w, int h);
   Window createWindow(WindowFlags, const char *title, int w, int h);
   Window createWindow(const char *title, int x, int y, int w, int h);
   Window createWindow(const char *title, int w, int h);
+
 };
 
 class WindowFlags {
@@ -217,6 +253,55 @@ public:
 
 #ifdef IMPLEMENT_WSDL
 
+RWOps::RWOps(SDL& sdl, const char *fn, const char *mode)
+  : mSDL(sdl)
+{
+  mIntern = SDL_RWFromFile(fn, mode);
+  mOK = mIntern != NULL;
+  mClosed = false;
+}
+
+RWOps::~RWOps() {
+  close();
+}
+
+bool RWOps::ok() { return mOK && !mClosed; }
+
+Sint64 RWOps::size() {
+  return mIntern->size(mIntern);
+}
+
+Sint64 RWOps::seek(Sint64 pos) {
+  return seek(pos, Whence::Set);
+}
+
+Sint64 RWOps::seek(Sint64 pos, Whence whence) {
+  return mIntern->seek(mIntern, pos, whence);
+}
+
+size_t RWOps::read(void *buf, size_t size) {
+  return read(buf, size, 1);
+}
+
+size_t RWOps::read(void *buf, size_t elem_size, size_t num) {
+  return mIntern->read(mIntern, buf, elem_size, num);
+}
+
+size_t RWOps::write(const void *buf, size_t size) {
+  return write(buf, size, 1);
+}
+
+size_t RWOps::write(const void *buf, size_t elem_size, size_t num) {
+  return mIntern->write(mIntern, buf, elem_size, num);
+}
+
+void RWOps::close() {
+  if(mClosed) return;
+
+  SDL_RWclose(mIntern);
+  mClosed = true;
+}
+
 InitFlags InitFlags::everything()     { mEverything = true;     return *this; }
 InitFlags InitFlags::timer()          { mTimer = true;          return *this; }
 InitFlags InitFlags::audio()          { mAudio = true;          return *this; }
@@ -253,10 +338,37 @@ SDL::~SDL() {
   SDL_Quit();
 }
 
+bool SDL::ok() { return mOK; }
+
 void SDL::pollEvents(std::function<void(Event)> f) {
   Event e;
   while(SDL_PollEvent(&e))
     f(e);
+}
+
+Path SDL::basePath() {
+  if(mBasePath)
+    return *mBasePath;
+
+  auto raw = SDL_GetBasePath();
+  mBasePath = Path(raw);
+  SDL_free(raw);
+  return *mBasePath;
+}
+
+Path SDL::prefPath(const char *org, const char *app) {
+  auto raw = SDL_GetPrefPath(org, app);
+  auto path = Path(raw);
+  SDL_free(raw);
+  return path;
+}
+
+RWOps SDL::open(const char *fn, const char *mode) {
+  return RWOps(*this, fn, mode);
+}
+
+RWOps SDL::open(Path p, const char *mode) {
+  return RWOps(*this, p.u8string().c_str(), mode);
 }
 
 Window SDL::createWindow(WindowFlags flags, const char *title, int x, int y, int w, int h) {

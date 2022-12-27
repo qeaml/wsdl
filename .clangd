@@ -1,6 +1,12 @@
 CompileFlags:
   Add: [
+    -DIMPLEMENT_WSDL,
     -DWSDL_DEBUG,
     -xc++,
     -std=c++17,
   ]
+---
+If:
+  PathMatch: test[/\\].*[/\\].*\.[ch]pp
+CompileFlags:
+  Add: -I../../
